@@ -1,0 +1,69 @@
+variables:
+  YARN_CACHE_FOLDER: $(Pipeline.Workspace)/.yarn
+
+trigger:
+- master
+
+jobs:
+- job: BuildApp
+  displayName: Build App
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '12.13.x'
+  - script: |
+      curl -o- -L https://yarnpkg.com/install.sh | bash
+    displayName: "Install Yarn"
+  - task: CacheBeta@1
+    inputs:
+      key: yarn | $(Agent.OS) | yarn.lock
+      path: $(YARN_CACHE_FOLDER)
+    displayName: "Cache Yarn packages"
+  - task: Bash@3
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -e
+        yarn --frozen-lockfile
+      noRc: false
+    displayName: "Install Dependencies"
+  - bash: |
+      set -e
+      . ci/setup.sh
+      export MSG=$(ts-node tools/src/commit-msg)
+      ts-node tools/*/bump-version.ts
+      yarn global add serve
+      yarn tools:prepare-lib
+      ./ci/scripts/build-style-compiler.sh
+      node dist/@alyle/ui/style-compiler/main src
+      # yarn ng build alyle-ui --aot --output-path dist/alyle-ui-aot
+      yarn build
+    displayName: 'Build App'
+  - task: PublishPipelineArtifact@1
+    inputs:
+      path: 'dist/alyle-ui'
+      artifact: WebApp
+
+- job: BuildDocsAndArtifacts
+  displayName: Build docs & artifacts
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '12.13.x'
+  - bash: |
+      set -e
+      ./ci/scripts/build-docs-artifacts.sh
+    displayName: build:@alyle/ui
+  - script: |
+      set -e
+      . ci/setup.sh
+      yarn tools:docs-api
+    displayName: Build docs-content
+  - task: PublishPipelineArtifact@1
+    inputs:
+      path: 'dist/@alyle/ui'
+      artifact: alyle-ui-pkg
